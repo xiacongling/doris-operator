@@ -57,7 +57,6 @@ const (
 	FileCachePathKey                     = "file_cache_path"
 	FileCacheSubConfigPathKey            = "path"
 	FileCacheSubConfigTotalSizeKey       = "total_size"
-
 )
 
 type DisaggregatedSubController interface {
@@ -294,11 +293,11 @@ func (d *DisaggregatedSubDefaultController) GetManagementAdminUserAndPWD(ctx con
 }
 
 // add cluster specification on container spec. this is useful to add common spec on different type pods, example: kerberos volume for fe and be.
-func(d *DisaggregatedSubDefaultController) AddClusterSpecForPodTemplate(componentType v1.DisaggregatedComponentType, configMap map[string]interface{}, spec *v1.DorisDisaggregatedClusterSpec, pts *corev1.PodTemplateSpec){
+func (d *DisaggregatedSubDefaultController) AddClusterSpecForPodTemplate(componentType v1.DisaggregatedComponentType, configMap map[string]interface{}, spec *v1.DorisDisaggregatedClusterSpec, pts *corev1.PodTemplateSpec) {
 	var c *corev1.Container
 	switch componentType {
 	case v1.DisaggregatedFE:
-		for	i, _ := range pts.Spec.Containers {
+		for i, _ := range pts.Spec.Containers {
 			if pts.Spec.Containers[i].Name == resource.DISAGGREGATED_FE_MAIN_CONTAINER_NAME {
 				c = &pts.Spec.Containers[i]
 				break
@@ -334,8 +333,8 @@ func(d *DisaggregatedSubDefaultController) AddClusterSpecForPodTemplate(componen
 
 }
 
-//return which generation had updated the statefulset.
-func(d *DisaggregatedSubDefaultController) ReturnStatefulsetUpdatedGeneration(sts *appv1.StatefulSet, annoGenerationKey string) int64 {
+// return which generation had updated the statefulset.
+func (d *DisaggregatedSubDefaultController) ReturnStatefulsetUpdatedGeneration(sts *appv1.StatefulSet, annoGenerationKey string) int64 {
 	if sts == nil {
 		return 0
 	}
@@ -350,17 +349,16 @@ func(d *DisaggregatedSubDefaultController) ReturnStatefulsetUpdatedGeneration(st
 	return g
 }
 
-//use statefulset.status.updateRevision and pod `controller-revision-hash` annotation to check pods updated to new revision.
-//if all pods used new updateRevision return true, else return false.
-func(d *DisaggregatedSubDefaultController) StatefulsetControlledPodsAllUseNewUpdateRevision(stsUpdateRevision string, pods []corev1.Pod) bool {
+// use statefulset.status.updateRevision and pod `controller-revision-hash` annotation to check pods updated to new revision.
+// if all pods used new updateRevision return true, else return false.
+func (d *DisaggregatedSubDefaultController) StatefulsetControlledPodsAllUseNewUpdateRevision(stsUpdateRevision string, pods []corev1.Pod) bool {
 	if stsUpdateRevision == "" {
 		return false
 	}
 
-	if len(pods) ==0 {
+	if len(pods) == 0 {
 		return false
 	}
-
 
 	for _, pod := range pods {
 		labels := pod.Labels
@@ -375,7 +373,8 @@ func(d *DisaggregatedSubDefaultController) StatefulsetControlledPodsAllUseNewUpd
 }
 
 func (d *DisaggregatedSubDefaultController) BuildVolumesVolumeMountsAndPVCs(confMap map[string]interface{}, componentType v1.DisaggregatedComponentType, commonSpec *v1.CommonSpec) ([]corev1.Volume, []corev1.VolumeMount, []corev1.PersistentVolumeClaim) {
-	if commonSpec.PersistentVolume == nil && len(commonSpec.PersistentVolumes) == 0 {
+	hostPathLoggingEnabled := commonSpec.LogHostPath != nil && commonSpec.LogHostPath.Enabled == true
+	if commonSpec.PersistentVolume == nil && len(commonSpec.PersistentVolumes) == 0 && !hostPathLoggingEnabled {
 		vs, vms := d.getEmptyDirVolumesVolumeMounts(confMap, componentType)
 		return vs, vms, nil
 	}
@@ -443,7 +442,6 @@ func (d *DisaggregatedSubDefaultController) PersistentVolumeBuildVolumesVolumeMo
 
 	}
 
-
 	var vs []corev1.Volume
 	var vms []corev1.VolumeMount
 	var pvcs []corev1.PersistentVolumeClaim
@@ -493,7 +491,9 @@ func (d *DisaggregatedSubDefaultController) PersistentVolumeArrayBuildVolumesVol
 	}
 
 	//the last check logNotStore, fist check config in any one of persistentVolumes.
-	if !logNotStore && !commonSpec.LogNotStore {
+	// we do NOT need a pvc to store logs if logHostPath enabled
+	hostPathLoggingEnabled := commonSpec.LogHostPath != nil && commonSpec.LogHostPath.Enabled == true
+	if !logNotStore && !commonSpec.LogNotStore && !hostPathLoggingEnabled {
 		logPath := d.getLogPath(confMap, componentType)
 		requiredPaths = append(requiredPaths, logPath)
 	}
@@ -542,11 +542,33 @@ func (d *DisaggregatedSubDefaultController) PersistentVolumeArrayBuildVolumesVol
 	var vms []corev1.VolumeMount
 	var pvcs []corev1.PersistentVolumeClaim
 
+	// generate hostPath for logging if required
+	if hostPathLoggingEnabled {
+		name := ""
+		switch componentType {
+		case v1.DisaggregatedFE:
+			name = FELogStoreName
+		case v1.DisaggregatedBE:
+			name = BELogStoreName
+		case v1.DisaggregatedMS:
+			name = MSLogStoreName
+		}
+		vs = append(vs, corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{
+			HostPath: commonSpec.LogHostPath.HostPath,
+		}})
+		vms = append(vms, corev1.VolumeMount{
+			Name:        name,
+			MountPath:   d.getLogPath(confMap, componentType),
+			SubPath:     commonSpec.LogHostPath.SubPath,
+			SubPathExpr: commonSpec.LogHostPath.SubPathExpr,
+		})
+	}
+
 	//generate pvc from the last path in requiredPaths, the mountPath that  configured by user is the highest wight, so first use the v1pv to generate pvc not template v1pv.
 	ss := set.NewSetString()
 
-	for i:= len(requiredPaths); i > 0; i-- {
-		path := requiredPaths[i -1]
+	for i := len(requiredPaths); i > 0; i-- {
+		path := requiredPaths[i-1]
 		//if the path have build volume, vm, pvc, skip it.
 		if ss.Find(path) {
 			continue

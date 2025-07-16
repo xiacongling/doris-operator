@@ -165,6 +165,9 @@ type CommonSpec struct {
 	//if config true, the log will mount a pvc to store logs. the pvc size is definitely 200Gi, as the log recycling system will regular recycling.
 	LogNotStore bool `json:"logNotStore,omitempty"`
 
+	// config for hostPath logging
+	LogHostPath *LogHostPath `json:"logHostPath,omitempty"`
+
 	//volume template for mountPath
 	PersistentVolumes []PersistentVolume `json:"persistentVolumes,omitempty"`
 	// (Optional) Tolerations for scheduling pods onto some dedicated nodes
@@ -240,6 +243,22 @@ type PersistentVolume struct {
 	//Annotation for PVC pods. Users can adapt the storage authentication and pv binding of the cloud platform through configuration.
 	//It only takes effect in the first configuration and cannot be added or modified later.
 	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+type LogHostPath struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// hostPath volume config. More info: https://kubernetes.io/docs/concepts/storage/volumes/#hostpath
+	HostPath *corev1.HostPathVolumeSource `json:"hostPath,omitempty"`
+	// Path within the volume from which the container's volume should be mounted.
+	// Defaults to "" (volume's root).
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
+	// Expanded path within the volume from which the container's volume should be mounted.
+	// Behaves similarly to SubPath but environment variable references $(VAR_NAME) are expanded using the container's environment.
+	// Defaults to "" (volume's root).
+	// SubPathExpr and SubPath are mutually exclusive.
+	// +optional
+	SubPathExpr string `json:"subPathExpr,omitempty"`
 }
 
 type Secret struct {
